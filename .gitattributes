@@ -1,3 +1,4 @@
+*.zip filter=lfs diff=lfs merge=lfs -text
 musicnet_midis.zip filter=lfs diff=lfs merge=lfs -text
 train_octuples/*.txt filter=lfs diff=lfs merge=lfs -text
 test_octuples/*.txt filter=lfs diff=lfs merge=lfs -text
