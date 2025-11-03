@@ -13,6 +13,7 @@ import math
 import signal
 import hashlib
 from multiprocessing import Pool, Lock, Manager
+import traceback
 
 
 pos_resolution = 16  # per beat (quarter note)
@@ -37,16 +38,32 @@ max_inst = 127
 max_pitch = 127
 max_velocity = 127
 
-data_zip = None
+# Global variables (Initialized to None)
+data_path = None
 output_file = None
 
+# Multiprocessing Globals (Will be assigned inside __main__ and passed to workers)
+lock_file = None 
+lock_write = None 
+lock_set = None 
+manager = None 
+midi_dict = None 
+worker_data_path = None # Used by worker processes for the input directory path
 
-lock_file = Lock()
-lock_write = Lock()
-lock_set = Lock()
-manager = Manager()
-midi_dict = manager.dict()
 
+# --- Worker Initialization Function ---# --- CORRECTED Worker Initialization Function ---
+# Added m_output_file to the arguments list
+def worker_init(path, l_file, l_write, l_set, m_dict, m_output_file): 
+    """Initializes global variables within each worker process."""
+    global worker_data_path, worker_output_file # <--- ADD worker_output_file HERE
+    global lock_file, lock_write, lock_set, midi_dict
+    
+    worker_data_path = path
+    worker_output_file = m_output_file # <--- ASSIGNMENT TO THE CORRECT GLOBAL
+    lock_file = l_file
+    lock_write = l_write
+    lock_set = l_set
+    midi_dict = m_dict
 
 # (0 Measure, 1 Pos, 2 Program, 3 Pitch, 4 Duration, 5 Velocity, 6 TimeSig, 7 Tempo)
 # (Measure, TimeSig)
@@ -136,12 +153,11 @@ def time_signature_reduce(numerator, denominator):
     return numerator, denominator
 
 
-def writer(file_name, output_str_list):
-    # note: parameter "file_name" is reserved for patching
-    with open(output_file, 'a') as f:
+def writer(output_file_path, output_str_list):
+    # Use the local argument instead of the global variable
+    with open(output_file_path, 'a') as f: 
         for output_str in output_str_list:
             f.write(output_str + '\n')
-
 
 def gen_dictionary(file_name):
     num = 0
@@ -305,14 +321,16 @@ def get_hash(encoding):
 
 
 def F(file_name):
+    # Construct the full file path using the worker-local global path
+    full_path = os.path.join(worker_data_path, file_name)
     try_times = 10
     midi_file = None
     for _ in range(try_times):
         try:
-            lock_file.acquire()
-            with data_zip.open(file_name) as f:
-                # this may fail due to unknown bug
+            lock_file.acquire() # Access lock that was passed in worker_init
+            with open(full_path, 'rb') as f: # READ FILE DIRECTLY FROM DISK
                 midi_file = io.BytesIO(f.read())
+            break # Success, exit the loop
         except BaseException as e:
             try_times -= 1
             time.sleep(1)
@@ -321,10 +339,17 @@ def F(file_name):
                       ' ' + str(e) + '\n', end='')
                 return None
         finally:
-            lock_file.release()
+            lock_file.release() # Release lock that was passed in worker_init
+
+    # If file reading failed in the loop
+    if midi_file is None:
+        return None 
+        
     try:
         with timeout(seconds=600):
-            midi_obj = miditoolkit.midi.parser.MidiFile(file=midi_file)
+            # Pass the in-memory stream to miditoolkit parser
+            midi_obj = miditoolkit.midi.parser.MidiFile(file=midi_file) 
+            
         # check abnormal values in parse result
         assert all(0 <= j.start < 2 ** 31 and 0 <= j.end < 2 **
                    31 for i in midi_obj.instruments for j in i.notes), 'bad note time'
@@ -356,13 +381,13 @@ def F(file_name):
                 midi_hash = get_hash(e)
             except BaseException as e:
                 pass
-            lock_set.acquire()
+            lock_set.acquire() # Access lock that was passed in worker_init
             if midi_hash in midi_dict:
                 dup_file_name = midi_dict[midi_hash]
                 duplicated = True
             else:
                 midi_dict[midi_hash] = file_name
-            lock_set.release()
+            lock_set.release() # Release lock that was passed in worker_init
             if duplicated:
                 print('ERROR(DUPLICATED): ' + midi_hash + ' ' +
                       file_name + ' == ' + dup_file_name + '\n', end='')
@@ -402,13 +427,13 @@ def F(file_name):
             print('ERROR(ENCODE): ' + file_name + ' ' + str(e) + '\n', end='')
             return False
         try:
-            lock_write.acquire()
-            writer(file_name, output_str_list)
+            lock_write.acquire() # Access lock that was passed in worker_init
+            writer(worker_output_file, output_str_list)
         except BaseException as e:
             print('ERROR(WRITE): ' + file_name + ' ' + str(e) + '\n', end='')
             return False
         finally:
-            lock_write.release()
+            lock_write.release() # Release lock that was passed in worker_init
         print('SUCCESS: ' + file_name + '\n', end='')
         return True
     except BaseException as e:
@@ -422,7 +447,12 @@ def G(file_name):
     try:
         return F(file_name)
     except BaseException as e:
-        print('ERROR(UNCAUGHT): ' + file_name + '\n', end='')
+        # Print the full traceback for debugging
+        print(f'\n--- UNCAUGHT ERROR TRACEBACK for {file_name} ---', file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        print(f'------------------------------------------------', file=sys.stderr)
+        
+        print('ERROR(UNCAUGHT): ' + file_name + '\n', end='') # Still prints the standard error line
         return False
 
 
@@ -447,15 +477,30 @@ def encoding_to_str(e):
 
 
 if __name__ == '__main__':
-    data_path = input('Dataset zip path: ')
+    # 1. Initialize the global multiprocessing objects
+    lock_file = Lock()
+    lock_write = Lock()
+    lock_set = Lock()
+    manager = Manager()
+    midi_dict = manager.dict()
+    
+    # 2. Get the directory path
+    data_path = input('MIDI directory path: ')
     prefix = input('OctupleMIDI output path: ')
+    
     if os.path.exists(prefix):
         print('Output path {} already exists!'.format(prefix))
         sys.exit(0)
     os.system('mkdir -p {}'.format(prefix))
-    data_zip = zipfile.ZipFile(data_path, 'r')
-    file_list = [n for n in data_zip.namelist() if n[-4:].lower()
-                 == '.mid' or n[-5:].lower() == '.midi']
+    
+    # 3. Get file list from the directory
+    raw_file_list = os.listdir(data_path)
+    file_list = [n for n in raw_file_list if n[-4:].lower() == '.mid' or n[-5:].lower() == '.midi'] # Filter for MIDI files
+    
+    if not file_list:
+        print(f"Error: No MIDI files found in {data_path}")
+        sys.exit(1)
+
     random.shuffle(file_list)
     gen_dictionary('{}/dict.txt'.format(prefix))
     ok_cnt = 0
@@ -470,11 +515,18 @@ if __name__ == '__main__':
                                         100: 99 * total_file_cnt // 100]
         if sp == 'test':  # 1%
             file_list_split = file_list[99 * total_file_cnt // 100:]
-        output_file = '{}/midi_{}.txt'.format(prefix, sp)
-        with Pool(pool_num) as p:
-            result = list(p.imap_unordered(G, file_list_split))
-            all_cnt += sum((1 if i is not None else 0 for i in result))
-            ok_cnt += sum((1 if i is True else 0 for i in result))
+        output_file_path = '{}/schubert_midi_{}.txt'.format(prefix, sp)
+        
+        # 4. Create Pool, passing locks/manager/path to workers
+        with Pool(pool_num, initializer=worker_init, initargs=(data_path, lock_file, lock_write, lock_set, midi_dict, output_file_path,)) as p:
+                result = list(p.imap_unordered(G, file_list_split))
+                all_cnt += sum((1 if i is not None else 0 for i in result))
+                ok_cnt += sum((1 if i is True else 0 for i in result))
         output_file = None
-    print('{}/{} ({:.2f}%) MIDI files successfully processed'.format(ok_cnt,
-                                                                     all_cnt, ok_cnt / all_cnt * 100))
+    
+    # Safely handle ZeroDivisionError
+    if all_cnt > 0:
+        print('{}/{} ({:.2f}%) MIDI files successfully processed'.format(ok_cnt,
+                                                                         all_cnt, ok_cnt / all_cnt * 100))
+    else:
+        print('No files were successfully processed.')
