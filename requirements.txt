@@ -1,26 +1,41 @@
-scikit-learn==0.21.3
-miditoolkit==0.1.14
-fastBPE
-dtw-python
+# Core dependencies that others build upon
+numpy>=2.0.0  # Latest version with Apple Silicon support
+Cython>=3.0.0  # Latest version
+setuptools>=65.5.1
+wheel>=0.38.0
+
+# Scientific computing
+scipy>=1.10.0
+scikit-learn>=1.0.0
+
+# Deep learning frameworks
+torch>=2.0.0  # Will get latest version with Apple Silicon support
+transformers>=4.30.0  # Latest version with better Apple Silicon support
+tensorboard>=2.13.0
+
+# Music processing
+miditoolkit>=0.1.14
+pretty_midi
+pypianoroll
+librosa>=0.10.0
+soundfile
+
+# NLP tools
 nltk
-keras
+pypinyin>=0.39.1
+jieba>=0.42.1
+textrank4zh>=0.3
+sentencepiece>=0.1.99  # Latest version with Apple Silicon support
+
+# Utilities
 tqdm
 matplotlib
-pretty_midi
 PyYAML
-pypianoroll
-fairseq==0.10.0
-torch==1.7.1
-transformers==3.5.1
-pypinyin==0.39.1
-jieba==0.42.1
-tensorboard==2.4.0
-scipy==1.3.1
-librosa
-pyworld
-soundfile
+dtw-python
 pyOpenSSL
-secrets
-pkuseg==0.0.25
-icecream==2.1.3
-textrank4zh==0.3
+icecream>=2.1.3
+
+# Temporarily removed packages that need investigation:
+# pyworld  # Needs investigation for Apple Silicon
+# fastBPE  # Needs investigation for Apple Silicon
+# fairseq  # Will install from source later
