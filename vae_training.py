@@ -1,6 +1,7 @@
 import torch
 from torch.utils.data import DataLoader, Dataset
 from vae_octuples import OctupleVAE, vae_loss
+from vae_octuples_hierarchical import OctupleVAE_HierarchicalDecoder
 import os
 from glob import glob
 
@@ -71,7 +72,7 @@ test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
 # --- Instantiate model ---
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 vocab_sizes = [256, 128, 129, 256, 128, 33, 128, 49]
-vae = OctupleVAE(vocab_sizes=vocab_sizes, embed_dim=64, hidden_dim=256, latent_dim=128, device=device)
+vae = OctupleVAE_HierarchicalDecoder(vocab_sizes=vocab_sizes, embed_dim=64, hidden_dim=256, latent_dim=128, chunks=4, device=device)
 vae = vae.to(device)
 
 optimizer = torch.optim.Adam(vae.parameters(), lr=learning_rate)
