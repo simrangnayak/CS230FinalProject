@@ -49,9 +49,11 @@ def load_octuples_from_folder(folder_path, tokens_per_note=8):
 
 # --- Hyperparameters ---
 batch_size = 64
-learning_rate = 1e-3
 epochs = 3
-train_dir = 'train_octuples'  # Folder containing octuple text files
+latent_dims = [32, 64, 128] # Different latent dimensions to experiment with
+learning_rates = [1e-3, 5e-4, 1e-4] # Different learning rates to experiment with
+KL_weights = [0.5, 1.0] # Different KL weights to experiment with
+train_dir = 'train_octuples'
 test_dir = 'test_octuples'
 val_dir = 'val_octuples' 
 
@@ -72,23 +74,87 @@ test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
 # --- Instantiate model ---
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 vocab_sizes = [256, 128, 129, 256, 128, 33, 128, 49]
-vae = OctupleVAE_HierarchicalDecoder(vocab_sizes=vocab_sizes, embed_dim=64, hidden_dim=256, latent_dim=128, chunks=4, device=device)
+
+validation_results = {}
+# Experiment with different hyperparameters
+for latent_dim in latent_dims:
+    for learning_rate in learning_rates:
+        for KL_weight in KL_weights:
+            print(f"Training VAE with latent_dim={latent_dim}, learning_rate={learning_rate}, KL_weight={KL_weight}")
+            # Decide which model to use: standard VAE or Hierarchical Decoder VAE
+            vae = OctupleVAE_HierarchicalDecoder(vocab_sizes=vocab_sizes, embed_dim=64, hidden_dim=256, latent_dim=latent_dim, chunks=4, device=device)
+            vae = vae.to(device)
+            optimizer = torch.optim.Adam(vae.parameters(), lr=learning_rate)
+
+            # --- Training loop ---
+            for epoch in range(epochs):
+                vae.train()
+                total_loss = 0
+                total_recon = 0
+                total_kl = 0
+                print(f"--- Epoch {epoch+1}/{epochs} ---")
+                for batch_idx, (batch, seq_lens) in enumerate(train_dataloader):
+                    batch = batch.to(device)
+                    optimizer.zero_grad()
+                    outputs, mu, logvar = vae(batch)
+                    loss, recon_loss, kl_loss = vae_loss(outputs, batch, mu, logvar, KL_weight=KL_weight)
+                    loss.backward()
+                    optimizer.step()
+                    total_loss += loss.item()
+                    total_recon += recon_loss.item()
+                    total_kl += kl_loss.item()
+
+                    if (batch_idx + 1) % 100 == 0:
+                        print(f"Batch {batch_idx+1}/{len(train_dataloader)} | "
+                              f"Loss: {loss.item():.4f} | Recon: {recon_loss.item():.4f} | KL: {kl_loss.item():.4f}")
+
+                print(f"Epoch {epoch+1}/{epochs} | Total Loss: {total_loss/len(train_dataloader):.4f} "
+                      f"| Recon Loss: {total_recon/len(train_dataloader):.4f} | KL Loss: {total_kl/len(train_dataloader):.4f}")
+                
+                # --- Validation ---
+                vae.eval()
+                val_loss = 0
+                val_recon = 0
+                val_kl = 0
+                with torch.no_grad():
+                    for batch, seq_lens in val_dataloader:
+                        batch = batch.to(device)
+                        outputs, mu, logvar = vae(batch)
+                        loss, recon_loss, kl_loss = vae_loss(outputs, batch, mu, logvar, KL_weight=KL_weight)
+                        val_loss += loss.item()
+                        val_recon += recon_loss.item()
+                        val_kl += kl_loss.item()
+                
+                validation_results[(latent_dim, learning_rate, KL_weight)] = val_loss / len(val_dataloader)
+                    
+                print(f"Validation | Total Loss: {val_loss/len(val_dataloader):.4f} "
+                      f"| Recon Loss: {val_recon/len(val_dataloader):.4f} | KL Loss: {val_kl/len(val_dataloader):.4f}")
+
+
+# --- Test best model ---
+best_hyperparams = min(validation_results, key=validation_results.get)
+best_latent_dim, best_learning_rate, best_KL_weight = best_hyperparams
+print(f"Best hyperparameters from validation: latent_dim={best_latent_dim}, learning_rate={best_learning_rate}, KL_weight={best_KL_weight}")
+
+# Instantiate best model
+vae = OctupleVAE_HierarchicalDecoder(vocab_sizes=vocab_sizes, embed_dim=64, hidden_dim=256, latent_dim=best_latent_dim, chunks=4, device=device)
 vae = vae.to(device)
+optimizer = torch.optim.Adam(vae.parameters(), lr=best_learning_rate)
+full_train_dataset = OctupleDataset(train_sequences + val_sequences)
+full_train_dataloader = DataLoader(full_train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
-optimizer = torch.optim.Adam(vae.parameters(), lr=learning_rate)
-
-# --- Training loop ---
+# Retrain best model on full training + validation set
 for epoch in range(epochs):
     vae.train()
     total_loss = 0
     total_recon = 0
     total_kl = 0
-    print(f"--- Epoch {epoch+1}/{epochs} ---")
-    for batch_idx, (batch, seq_lens) in enumerate(train_dataloader):
+    print(f"--- Retrain Epoch {epoch+1}/{epochs} ---")
+    for batch_idx, (batch, seq_lens) in enumerate(full_train_dataloader):
         batch = batch.to(device)
         optimizer.zero_grad()
         outputs, mu, logvar = vae(batch)
-        loss, recon_loss, kl_loss = vae_loss(outputs, batch, mu, logvar)
+        loss, recon_loss, kl_loss = vae_loss(outputs, batch, mu, logvar, KL_weight=best_KL_weight)
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
@@ -96,43 +162,25 @@ for epoch in range(epochs):
         total_kl += kl_loss.item()
 
         if (batch_idx + 1) % 100 == 0:
-            print(f"Batch {batch_idx+1}/{len(train_dataloader)} | "
+            print(f"Batch {batch_idx+1}/{len(full_train_dataloader)} | "
                   f"Loss: {loss.item():.4f} | Recon: {recon_loss.item():.4f} | KL: {kl_loss.item():.4f}")
 
-    print(f"Epoch {epoch+1}/{epochs} | Total Loss: {total_loss/len(train_dataloader):.4f} "
-          f"| Recon Loss: {total_recon/len(train_dataloader):.4f} | KL Loss: {total_kl/len(train_dataloader):.4f}")
-    
-    # --- Validation ---
-    vae.eval()
-    val_loss = 0
-    val_recon = 0
-    val_kl = 0
-    with torch.no_grad():
-        for batch, seq_lens in val_dataloader:
-            batch = batch.to(device)
-            outputs, mu, logvar = vae(batch)
-            loss, recon_loss, kl_loss = vae_loss(outputs, batch, mu, logvar)
-            val_loss += loss.item()
-            val_recon += recon_loss.item()
-            val_kl += kl_loss.item()
-        
-    print(f"Validation | Total Loss: {val_loss/len(val_dataloader):.4f} "
-          f"| Recon Loss: {val_recon/len(val_dataloader):.4f} | KL Loss: {val_kl/len(val_dataloader):.4f}")
-    
+    print(f"Retrain Epoch {epoch+1}/{epochs} | Total Loss: {total_loss/len(full_train_dataloader):.4f} "
+          f"| Recon Loss: {total_recon/len(full_train_dataloader):.4f} | KL Loss: {total_kl/len(full_train_dataloader):.4f}")
 
-# --- Testing ---
-vae.eval()
-test_loss = 0
-test_recon = 0
-test_kl = 0
-with torch.no_grad():
-    for batch, seq_lens in test_dataloader:
-        batch = batch.to(device)
-        outputs, mu, logvar = vae(batch)
-        loss, recon_loss, kl_loss = vae_loss(outputs, batch, mu, logvar)
-        test_loss += loss.item()
-        test_recon += recon_loss.item()
-        test_kl += kl_loss.item()
+# # --- Testing ---
+# vae.eval()
+# test_loss = 0
+# test_recon = 0
+# test_kl = 0
+# with torch.no_grad():
+#     for batch, seq_lens in test_dataloader:
+#         batch = batch.to(device)
+#         outputs, mu, logvar = vae(batch)
+#         loss, recon_loss, kl_loss = vae_loss(outputs, batch, mu, logvar)
+#         test_loss += loss.item()
+#         test_recon += recon_loss.item()
+#         test_kl += kl_loss.item()
 
-print(f"Test | Total Loss: {test_loss/len(test_dataloader):.4f} "
-      f"| Recon Loss: {test_recon/len(test_dataloader):.4f} | KL Loss: {test_kl/len(test_dataloader):.4f}")
+# print(f"Test | Total Loss: {test_loss/len(test_dataloader):.4f} "
+#       f"| Recon Loss: {test_recon/len(test_dataloader):.4f} | KL Loss: {test_kl/len(test_dataloader):.4f}")

@@ -104,7 +104,7 @@ class OctupleVAE_HierarchicalDecoder(nn.Module):
         return outputs, mu, logvar
 
 # Loss function
-def vae_loss(outputs, x, mu, logvar):
+def vae_loss(outputs, x, mu, logvar, KL_weight=1.0):
     """
     outputs: list of 8 tensors [batch, seq_len, vocab_i]
     x: [batch, seq_len, 8] long
@@ -114,4 +114,4 @@ def vae_loss(outputs, x, mu, logvar):
         recon_loss += F.cross_entropy(outputs[i].permute(0, 2, 1), x[:, :, i], reduction='mean')
     # KL divergence
     kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-    return recon_loss + kl_loss, recon_loss, kl_loss
+    return recon_loss + KL_weight * kl_loss, recon_loss, kl_loss
