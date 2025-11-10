@@ -50,6 +50,8 @@ def load_octuples_from_folder(folder_path, tokens_per_note=8):
 # --- Hyperparameters ---
 batch_size = 64
 epochs = 3
+embed_dim = 64
+hidden_dim = 256
 latent_dims = [32, 64, 128] # Different latent dimensions to experiment with
 learning_rates = [1e-3, 5e-4, 1e-4] # Different learning rates to experiment with
 KL_weights = [0.5, 1.0] # Different KL weights to experiment with
@@ -73,16 +75,16 @@ test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
 
 # --- Instantiate model ---
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# vocab sizes for each of the 8 channels
 vocab_sizes = [256, 128, 129, 256, 128, 33, 128, 49]
 
 validation_results = {}
-# Experiment with different hyperparameters
 for latent_dim in latent_dims:
     for learning_rate in learning_rates:
         for KL_weight in KL_weights:
             print(f"Training VAE with latent_dim={latent_dim}, learning_rate={learning_rate}, KL_weight={KL_weight}")
             # Decide which model to use: standard VAE or Hierarchical Decoder VAE
-            vae = OctupleVAE_HierarchicalDecoder(vocab_sizes=vocab_sizes, embed_dim=64, hidden_dim=256, latent_dim=latent_dim, chunks=4, device=device)
+            vae = OctupleVAE_HierarchicalDecoder(vocab_sizes=vocab_sizes, embed_dim=embed_dim, hidden_dim=hidden_dim, latent_dim=latent_dim, chunks=4, device=device)
             vae = vae.to(device)
             optimizer = torch.optim.Adam(vae.parameters(), lr=learning_rate)
 
@@ -168,19 +170,19 @@ for epoch in range(epochs):
     print(f"Retrain Epoch {epoch+1}/{epochs} | Total Loss: {total_loss/len(full_train_dataloader):.4f} "
           f"| Recon Loss: {total_recon/len(full_train_dataloader):.4f} | KL Loss: {total_kl/len(full_train_dataloader):.4f}")
 
-# # --- Testing ---
-# vae.eval()
-# test_loss = 0
-# test_recon = 0
-# test_kl = 0
-# with torch.no_grad():
-#     for batch, seq_lens in test_dataloader:
-#         batch = batch.to(device)
-#         outputs, mu, logvar = vae(batch)
-#         loss, recon_loss, kl_loss = vae_loss(outputs, batch, mu, logvar)
-#         test_loss += loss.item()
-#         test_recon += recon_loss.item()
-#         test_kl += kl_loss.item()
+# Test evaluation
+vae.eval()
+test_loss = 0
+test_recon = 0
+test_kl = 0
+with torch.no_grad():
+    for batch, seq_lens in test_dataloader:
+        batch = batch.to(device)
+        outputs, mu, logvar = vae(batch)
+        loss, recon_loss, kl_loss = vae_loss(outputs, batch, mu, logvar, KL_weight=best_KL_weight)
+        test_loss += loss.item()
+        test_recon += recon_loss.item()
+        test_kl += kl_loss.item()
 
-# print(f"Test | Total Loss: {test_loss/len(test_dataloader):.4f} "
-#       f"| Recon Loss: {test_recon/len(test_dataloader):.4f} | KL Loss: {test_kl/len(test_dataloader):.4f}")
+print(f"Test | Total Loss: {test_loss/len(test_dataloader):.4f} "
+      f"| Recon Loss: {test_recon/len(test_dataloader):.4f} | KL Loss: {test_kl/len(test_dataloader):.4f}")

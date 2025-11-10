@@ -23,21 +23,21 @@ class OctupleVAE_HierarchicalDecoder(nn.Module):
             nn.Embedding(vocab_size, embed_dim) for vocab_size in vocab_sizes
         ])
 
-        # Encoder GRU
+        # encoder GRU
         self.encoder_gru = nn.GRU(embed_dim * 8, hidden_dim, num_layers, batch_first=True, bidirectional=True)
 
-        # Latent vectors
+        # latent vectors used for reparametrization
         self.fc_mean = nn.Linear(hidden_dim * 2, latent_dim)
         self.fc_logvar = nn.Linear(hidden_dim * 2, latent_dim)
 
-        # Decoder initial hidden state from z
+        # decoder initial hidden state from z
         self.fc_hidden = nn.Linear(latent_dim, hidden_dim * num_layers)
 
-        # Hierarchical Decoder
+        # hierarchical Decoder
         self.high_rnn = nn.GRU(latent_dim, hidden_dim, num_layers, batch_first=True)
         self.low_rnn = nn.GRU(embed_dim*8 + hidden_dim, hidden_dim, num_layers, batch_first=True)
 
-        # Output projections for each channel
+        # output projections for each channel to turn hidden states into vocab logits
         self.output_layers = nn.ModuleList([
             nn.Linear(hidden_dim, vocab_size) for vocab_size in vocab_sizes
         ])
@@ -52,11 +52,14 @@ class OctupleVAE_HierarchicalDecoder(nn.Module):
 
         h_enc, _ = self.encoder_gru(x_emb)  # [batch, seq_len, hidden*2]
         h_last = h_enc[:, -1, :]            # take last timestep
+        
+        # find latent vectors
         z_mean = self.fc_mean(h_last)
         z_logvar = self.fc_logvar(h_last)
         return z_mean, z_logvar
 
     def reparameterize(self, mu, logvar):
+        """Returns z sample from latent distribution"""
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return mu + eps * std
@@ -67,6 +70,7 @@ class OctupleVAE_HierarchicalDecoder(nn.Module):
         seq_len: length of output sequence
         x: optional teacher-forcing input [batch, seq_len, 8]
         """
+        # process z through high-level RNN
         z_expanded = z.unsqueeze(1).repeat(1, self.chunks, 1)  # [batch, chunks, latent_dim]
         high_hidden, _ = self.high_rnn(z_expanded)  # [batch, chunks, hidden_dim]
         
@@ -74,18 +78,22 @@ class OctupleVAE_HierarchicalDecoder(nn.Module):
         batch_size = z.size(0)
         for i in range(self.chunks):
             chunk_hidden = high_hidden[:, i, :].unsqueeze(0).repeat(self.low_rnn.num_layers, 1, 1)  # [num_layers, batch, hidden_dim]
+
+            # start with <s> tokens if true sequence not provided
             if x is None:
                 x_input = torch.zeros(batch_size, seq_len // self.chunks, 8, dtype=torch.long, device=self.device)
             else:
                 x_input = x[:, i*(seq_len//self.chunks):(i+1)*(seq_len//self.chunks), :]
 
+            # embed input and concatenate
             embeds = [self.embeddings[j](x_input[:, :, j]) for j in range(8)]
             x_emb = torch.cat(embeds, dim=-1)  # [batch, chunk_seq_len, embed_dim*8]
 
-            # Concatenate high-level hidden state to each timestep input
+            # concatenate high-level hidden state to each timestep input
             high_context = chunk_hidden[-1].unsqueeze(1).repeat(1, x_emb.size(1), 1)  # [batch, chunk_seq_len, hidden_dim]
             low_input = torch.cat([x_emb, high_context], dim=-1)  # [batch, chunk_seq_len, embed_dim*8 + hidden_dim]
 
+            # decode through low-level RNN
             h_dec, _ = self.low_rnn(low_input, chunk_hidden)
             outputs = [layer(h_dec) for layer in self.output_layers]  # list of [batch, chunk_seq_len, vocab_i]
             
@@ -109,9 +117,11 @@ def vae_loss(outputs, x, mu, logvar, KL_weight=1.0):
     outputs: list of 8 tensors [batch, seq_len, vocab_i]
     x: [batch, seq_len, 8] long
     """
+    # reconstruction loss
     recon_loss = 0
     for i in range(8):
         recon_loss += F.cross_entropy(outputs[i].permute(0, 2, 1), x[:, :, i], reduction='mean')
+
     # KL divergence
     kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
     return recon_loss + KL_weight * kl_loss, recon_loss, kl_loss
