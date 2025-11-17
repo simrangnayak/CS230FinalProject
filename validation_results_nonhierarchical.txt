@@ -1,0 +1,6 @@
+latent_dim=32, learning_rate=0.001, KL_weight=0.5 => Val Loss: 0.1327
+latent_dim=32, learning_rate=0.001, KL_weight=1.0 => Val Loss: 0.1433
+latent_dim=64, learning_rate=0.001, KL_weight=0.5 => Val Loss: 0.1352
+latent_dim=64, learning_rate=0.001, KL_weight=1.0 => Val Loss: 0.1460
+latent_dim=128, learning_rate=0.001, KL_weight=0.5 => Val Loss: 0.1277
+latent_dim=128, learning_rate=0.001, KL_weight=1.0 => Val Loss: 0.1562
