@@ -1,8 +1,8 @@
 import os
+from glob import glob
 import sys
 import miditoolkit
 import numpy as np
-print(np.__version__)
 
 def check_midi_file(file_path):
     print(f"\n--- Checking: {file_path} ---")
@@ -95,8 +95,34 @@ def check_midi_file(file_path):
     return ok
 
 
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python check_midi_validity.py <path_to_midi>")
-        sys.exit(1)
-    check_midi_file(sys.argv[1])
+
+
+tokens_per_note = 8
+
+def get_vocab_sizes(folder):
+    max_vals = [0]*tokens_per_note
+
+    for path in glob(os.path.join(folder, '*.txt')):
+        with open(path, 'r') as f:
+            for line in f:
+                # remove <s> and </s> tokens
+                toks = [t for t in line.strip().split() if "<s>" not in t and "</s>" not in t]
+                if not toks:
+                    continue
+
+                # convert <j-k> to integer k
+                encoding = [int(t.split('-')[1][:-1]) for t in toks]
+                octuples = [encoding[i:i+tokens_per_note]
+                            for i in range(0, len(encoding), tokens_per_note)]
+
+                # update max for each of the 8 channels
+                for octuple in octuples:
+                    for j in range(tokens_per_note):
+                        max_vals[j] = max(max_vals[j], octuple[j])
+
+    vocab_sizes = [m+1 for m in max_vals]    # +1 because values start at 0
+    return vocab_sizes
+
+# Example:
+folder = "val_octuples"
+print(get_vocab_sizes(folder))

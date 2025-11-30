@@ -6,12 +6,18 @@ import os
 import sys
 import io
 import zipfile
-import miditoolkit
 import random
 import time
 import math
 import signal
 import hashlib
+import numpy as np
+
+# NumPy compatibility shim for deprecated aliases (NumPy >=1.20 removed np.int)
+if not hasattr(np, 'int'):
+    np.int = int  # type: ignore
+
+import miditoolkit
 from multiprocessing import Pool, Lock, Manager
 import traceback
 
