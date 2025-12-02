@@ -45,7 +45,7 @@ if octuples:
 
 # save test seq as MIDI
 midi_obj = encoding_to_MIDI([tuple(x) for x in octuples])
-midi_obj.dump("original.mid")
+midi_obj.dump("original_diffusion.mid")
 
 seq = torch.tensor(octuples).unsqueeze(0).to(device)  # [1, seq_len, 8]
 print(f"Sequence shape: {seq.shape}")
@@ -75,6 +75,8 @@ with torch.no_grad():
     # decode to save content classical reconstruction
     outputs = vae.decode(z_classical, seq_len=seq.size(1), x = seq, autoregressive=False)
 
+latent_dim = z_classical.size(-1)
+
 decoded = []
 for out in outputs:
     # out: [1, seq_len, vocab_size]
@@ -99,12 +101,11 @@ midi_obj.dump("reconstructed_diffusion.mid")
 # --- STYLE TRANSFER VIA DIFFUSION ---
 print("\nStarting diffusion-based style transfer...")
 # random gaussian noise vector as style latent - same shape as content latents
-latent_dim = z_classical.size(-1)
 style_latents = torch.randn_like(z_classical).to(device)  # [1, latent_dim]
 
 # load trained diffuser model
 diffuser = MLPDiffuser(time_embed_dim=128, in_dim=latent_dim, out_dim=latent_dim)
-diffuser.load_state_dict(torch.load("mlp_diffuser_best.pt", map_location=device))
+diffuser.load_state_dict(torch.load("mlp_diffuser_best_small.pt", map_location=device))
 diffuser.to(device)
 diffuser.eval()
 
@@ -153,21 +154,21 @@ def denoise_latent(style_latents, classical_latents, diffuser, num_steps=None):
     return x
 
 
-# For decoding, feed prefix from closest jazz latent
-# (to stabilize generation, as in training)
+# # For decoding, feed prefix from closest jazz latent
+# # (to stabilize generation, as in training)
 
-train_jazz_latents = torch.load("latents/train_jazz_latents.pt")
-val_jazz_latents = torch.load("latents/val_jazz_latents.pt")
-test_jazz_latents = torch.load("latents/test_jazz_latents.pt")
-all_jazz_latents = torch.cat([train_jazz_latents, val_jazz_latents, test_jazz_latents], dim=0)
+# train_jazz_latents = torch.load("latents/train_jazz_latents.pt")
+# val_jazz_latents = torch.load("latents/val_jazz_latents.pt")
+# test_jazz_latents = torch.load("latents/test_jazz_latents.pt")
+# all_jazz_latents = torch.cat([train_jazz_latents, val_jazz_latents, test_jazz_latents], dim=0)
 
-# find closest jazz latent in dataset to z_classical
-distances = torch.norm(all_jazz_latents - z_classical, dim=1)  # [N]
-closest_idx = torch.argmin(distances)
-z_jazz_start = all_jazz_latents[closest_idx].unsqueeze(0)
+# # find closest jazz latent in dataset to z_classical
+# distances = torch.norm(all_jazz_latents - z_classical, dim=1)  # [N]
+# closest_idx = torch.argmin(distances)
+# z_jazz_start = all_jazz_latents[closest_idx].unsqueeze(0)
 
 # start with random noise
-z_jazz_start = torch.randn_like(z_jazz_start).to(device)
+z_jazz_start = torch.randn(1, latent_dim).to(device)
 
 
 # Denoise from z_jazz_start
@@ -181,7 +182,6 @@ print(f"Latent distance from classical: {torch.norm(jazz_style_latent - z_classi
 print(f"\nFirst 10 dimensions comparison:")
 print(f"Classical: {z_classical[0, :10].cpu().numpy()}")
 print(f"Jazz:      {jazz_style_latent[0, :10].cpu().numpy()}")
-
 
 
 # Decode jazz-style latent to MIDI using prefix from random jazz octuple

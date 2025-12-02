@@ -70,9 +70,22 @@ def main():
     val_dir = 'val_octuples'
 
     # --- Load dataset ---
-    train_sequences = load_octuples_from_folder(train_dir)
-    test_sequences = load_octuples_from_folder(test_dir)
-    val_sequences = load_octuples_from_folder(val_dir)
+    train_classical = load_octuples_from_folder('train_octuples/classical_octuples')
+    train_jazz = load_octuples_from_folder('train_octuples')
+
+    val_classical = load_octuples_from_folder('val_octuples/classical_octuples')
+    val_jazz = load_octuples_from_folder('val_octuples')
+
+    test_classical = load_octuples_from_folder('test_octuples/classical_octuples')
+    test_jazz = load_octuples_from_folder('test_octuples')
+
+    train_sequences = train_jazz + train_classical
+    test_sequences = test_jazz + test_classical
+    val_sequences = val_jazz + val_classical
+    
+    # train_sequences = load_octuples_from_folder(train_dir)
+    # test_sequences = load_octuples_from_folder(test_dir)
+    # val_sequences = load_octuples_from_folder(val_dir)
     print(f"Loaded {len(train_sequences)} sequences for training.")
     print(f"Loaded {len(test_sequences)} sequences for testing.")
     print(f"Loaded {len(val_sequences)} sequences for validation.")

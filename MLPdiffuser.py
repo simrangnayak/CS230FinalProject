@@ -62,8 +62,10 @@ class SinusoidealPositionEmbeddings(nn.Module):
         return torch.cat((angles.sin(), angles.cos()), dim=-1)
     
 class MLPDiffuser(nn.Module):
-    def __init__(self, time_embed_dim, in_dim=128, out_dim=128, hidden_dims=[512, 1024, 512]):
+    def __init__(self, time_embed_dim, in_dim=128, out_dim=128, hidden_dims=[512]):
         super().__init__()
+
+        # previous: [512, 1024, 512]
         # time embedding
         self.time_mlp = nn.Sequential(
             SinusoidealPositionEmbeddings(time_embed_dim),
@@ -269,7 +271,7 @@ def main():
             best_val_loss = avg_val_loss
             patience_counter = 0
             # Save best model
-            torch.save(model.state_dict(), "mlp_diffuser_best.pt")
+            torch.save(model.state_dict(), "mlp_diffuser_best_small.pt")
             print(f"  → New best model saved!")
         else:
             patience_counter += 1
@@ -277,10 +279,10 @@ def main():
             if patience_counter >= patience:
                 print(f"Early stopping triggered after {epoch+1} epochs")
                 break    # Save final model (and copy best as default)
-    torch.save(model.state_dict(), "mlp_diffuser_final.pt")
+    torch.save(model.state_dict(), "mlp_diffuser_final_small.pt")
     # Save losses for plotting as csv
-    np.savetxt("mlp_diffuser_train_losses.csv", np.array(train_losses), delimiter=",")
-    np.savetxt("mlp_diffuser_val_losses.csv", np.array(val_losses), delimiter=",")
+    np.savetxt("mlp_diffuser_train_losses_small.csv", np.array(train_losses), delimiter=",")
+    np.savetxt("mlp_diffuser_val_losses_small.csv", np.array(val_losses), delimiter=",")
 
 if __name__ == "__main__":
     main()

@@ -6,6 +6,8 @@ from vae_training import OctupleDataset, load_octuples_from_folder, collate_fn
 
 # Run VAE to get latents for Jazz and Classical pieces
 train_jazz_octuples = load_octuples_from_folder("train_octuples")
+train_bach_octuples = 
+
 train_classical_octuples = load_octuples_from_folder("train_octuples/classical_octuples")
 val_jazz_octuples = load_octuples_from_folder("val_octuples")
 val_classical_octuples = load_octuples_from_folder("val_octuples/classical_octuples")

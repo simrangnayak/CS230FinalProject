@@ -39,15 +39,25 @@ if padded_len != original_len:
     seq = torch.cat([seq, padding], dim=1)
     print(f"Padded sequence from {original_len} to {padded_len}")
 
-vae = OctupleVAE_HierarchicalDecoder(vocab_sizes=vocab_sizes, embed_dim=64, hidden_dim=256, latent_dim=128, chunks=8, device=device)
-vae.load_state_dict(torch.load("vae_hierarchical_finetune_best.pt", map_location=device)["model"])
-vae.eval()
+vae_no_finetune = OctupleVAE_HierarchicalDecoder(vocab_sizes=vocab_sizes, embed_dim=64, hidden_dim=256, latent_dim=128, chunks=8, device=device)
+vae_no_finetune.load_state_dict(torch.load("vae_hierarchical_large.pt", map_location=device))
+vae_no_finetune.eval()
+
+vae_finetune = OctupleVAE_HierarchicalDecoder(vocab_sizes=vocab_sizes, embed_dim=64, hidden_dim=256, latent_dim=128, chunks=8, device=device)
+vae_finetune.load_state_dict(torch.load("vae_hierarchical_finetune_best.pt", map_location=device)["model"])
+vae_finetune.eval()
 
 # --- Deterministic reconstruction ---
 with torch.no_grad():
-    mu, logvar = vae.encode(seq)
+    mu, logvar = vae_no_finetune.encode(seq)
     z = mu  # use mean for deterministic output
-    outputs = vae.decode(z, seq_len=seq.size(1), x=seq, autoregressive=False)
+    outputs = vae_no_finetune.decode(z, seq_len=seq.size(1), x=seq, autoregressive=False)
+
+    mu_finetune, logvar_finetune = vae_finetune.encode(seq)
+    z_finetune = mu_finetune  # use mean for deterministic output
+    outputs_finetune = vae_finetune.decode(z_finetune, seq_len=seq.size(1), x=seq, autoregressive=False)
+
+    print(f"Latent means difference (no finetune vs finetune): {(mu - mu_finetune).abs().mean().item():.6f}")
 
 decoded = []
 for out in outputs:
@@ -55,22 +65,32 @@ for out in outputs:
     pred = torch.argmax(out, dim=-1)  # [1, seq_len]
     decoded.append(pred.squeeze(0).cpu().tolist())
 
+decoded_finetune = []
+for out in outputs_finetune:
+    pred = torch.argmax(out, dim=-1)
+    decoded_finetune.append(pred.squeeze(0).cpu().tolist())
+
 # convert back to octuples
 decoded = list(zip(*decoded))  # list of (seq_len, 8)
 decoded_tuples = [tuple(x) for x in decoded]
+
+decoded_finetune = list(zip(*decoded_finetune))
+decoded_finetune_tuples = [tuple(x) for x in decoded_finetune]
 
 
 # sanitize reconstruction tuples
 def clamp_tuple_vals(t):
     return tuple(max(0, min(127, int(v))) for v in t)
 decoded_tuples = [clamp_tuple_vals(t) for t in decoded_tuples]
+decoded_finetune_tuples = [clamp_tuple_vals(t) for t in decoded_finetune_tuples]
 
 # convert to MIDI and save
 midi_obj = encoding_to_MIDI(decoded_tuples)
-midi_obj.dump("reconstructed.mid")
+midi_obj.dump("reconstructed_no_finetune.mid")
 
+midi_obj = encoding_to_MIDI(decoded_finetune_tuples)
+midi_obj.dump("reconstructed_finetune.mid")
 
-# vae_hierarchical = OctupleVAE_HierarchicalDecoder(vocab_sizes=vocab_sizes, embed_dim=64, hidden_dim=256, latent_dim=32, chunks=4, device=device)
 
 # --- Autoregressive generation from latent (longer prefix for stability) ---
 generation_len = seq.size(1)  # Use actual padded length
@@ -83,8 +103,18 @@ with torch.no_grad():
     # Use the learned mean as latent for coherent generation
     z = mu  # [1, latent_dim]
     # Warm-up with a longer prefix and use first frame as start token
-    ar_outputs = vae.decode(
+    ar_outputs = vae_no_finetune.decode(
         z,
+        seq_len=generation_len,
+        autoregressive=True,
+        x_prefix=x_prefix,
+        temperature=1.0,
+        top_k=None
+    )
+
+    z_finetune = mu_finetune
+    ar_outputs_finetune = vae_finetune.decode(
+        z_finetune,
         seq_len=generation_len,
         autoregressive=True,
         x_prefix=x_prefix,
@@ -97,19 +127,38 @@ for out in ar_outputs:
     pred = torch.argmax(out, dim=-1)  # [1, seq_len]
     ar_decoded.append(pred.squeeze(0).cpu().tolist())
 
+ar_decoded_finetune = []
+for out in ar_outputs_finetune:
+    pred = torch.argmax(out, dim=-1)
+    ar_decoded_finetune.append(pred.squeeze(0).cpu().tolist())
+
 ar_decoded = list(zip(*ar_decoded))
 ar_decoded_tuples = [tuple(x) for x in ar_decoded]
 ar_decoded_tuples = [clamp_tuple_vals(t) for t in ar_decoded_tuples]
 
+ar_decoded_finetune = list(zip(*ar_decoded_finetune))
+ar_decoded_finetune_tuples = [tuple(x) for x in ar_decoded_finetune]
+ar_decoded_finetune_tuples = [clamp_tuple_vals(t) for t in ar_decoded_finetune_tuples]
+
 encoding_to_MIDI(ar_decoded_tuples).dump("generated_from_mu_ar.mid")
+encoding_to_MIDI(ar_decoded_finetune_tuples).dump("generated_from_mu_finetune_ar.mid")
 
 
-# --- Pure prior-sampled generation (with 16-token prefix) ---
+# --- Pure prior-sampled generation ---
 with torch.no_grad():
     # Sample z ~ N(0, I) for unconditional generation
     z_prior = torch.randn_like(mu)
     # Use same 16-token prefix for stability
-    prior_outputs = vae.decode(
+    prior_outputs = vae_no_finetune.decode(
+        z_prior,
+        seq_len=generation_len,
+        autoregressive=True,
+        x_prefix=x_prefix,
+        temperature=1.2,
+        top_k=12
+    )
+
+    prior_outputs_finetune = vae_finetune.decode(
         z_prior,
         seq_len=generation_len,
         autoregressive=True,
@@ -123,11 +172,21 @@ for out in prior_outputs:
     pred = torch.argmax(out, dim=-1)
     prior_decoded.append(pred.squeeze(0).cpu().tolist())
 
+prior_decoded_finetune = []
+for out in prior_outputs_finetune:
+    pred = torch.argmax(out, dim=-1)
+    prior_decoded_finetune.append(pred.squeeze(0).cpu().tolist())
+
 prior_decoded = list(zip(*prior_decoded))
 prior_decoded_tuples = [tuple(x) for x in prior_decoded]
 prior_decoded_tuples = [clamp_tuple_vals(t) for t in prior_decoded_tuples]
 
+prior_decoded_finetune = list(zip(*prior_decoded_finetune))
+prior_decoded_finetune_tuples = [tuple(x) for x in prior_decoded_finetune]
+prior_decoded_finetune_tuples = [clamp_tuple_vals(t) for t in prior_decoded_finetune_tuples]
+
 encoding_to_MIDI(prior_decoded_tuples).dump("generated_from_prior_ar.mid")
+encoding_to_MIDI(prior_decoded_finetune_tuples).dump("generated_from_prior_finetune_ar.mid")
 
 # # --- Sanitize helpers to avoid invalid MIDI data bytes ---
 # def clamp_tuple_vals(t):
