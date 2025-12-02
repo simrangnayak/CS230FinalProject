@@ -105,7 +105,7 @@ style_latents = torch.randn_like(z_classical).to(device)  # [1, latent_dim]
 
 # load trained diffuser model
 diffuser = MLPDiffuser(time_embed_dim=128, in_dim=latent_dim, out_dim=latent_dim)
-diffuser.load_state_dict(torch.load("mlp_diffuser_best_small.pt", map_location=device))
+diffuser.load_state_dict(torch.load("diffuser_params/mlp_diffuser_best_small.pt", map_location=device))
 diffuser.to(device)
 diffuser.eval()
 

@@ -80,7 +80,7 @@ def main():
     test_sequences = test_classical + test_jazz
     val_sequences = val_classical + val_jazz
     print(f"Loaded {len(train_sequences)} sequences for training.")
-    print(f"Loaded {len(test_sequences)} sequences for testing.")
+    #print(f"Loaded {len(test_sequences)} sequences for testing.")
     print(f"Loaded {len(val_sequences)} sequences for validation.")
 
     val_dataset = OctupleDataset(val_sequences)
