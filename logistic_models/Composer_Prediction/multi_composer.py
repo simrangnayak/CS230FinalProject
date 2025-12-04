@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, f1_score
 import os
 import glob
 import numpy as np
@@ -132,7 +132,11 @@ if __name__ == "__main__":
         all_preds = preds.cpu().numpy()
         all_labels = y_test.cpu().numpy()
 
+    #Calculate F1
+    f1 = f1_score(all_labels, all_preds, average='weighted')
+
     print(f"\nFinal Test Accuracy: {test_acc:.2f}%")
+    print(f"Final Test F1 Score: {f1:.4f}")
 
     torch.save({'model_state_dict': model.state_dict(),
         'composer_map': composer_map,'input_dim': 128,
