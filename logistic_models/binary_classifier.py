@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
 import matplotlib.pyplot as plt
+from sklearn.metrics import f1_score, confusion_matrix, ConfusionMatrixDisplay
 import os
 
 PATHS = {'train': {
@@ -112,7 +113,7 @@ def evaluate_model(model):
         test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
     except FileNotFoundError:
         print("Test files not found, skipping final evaluation.")
-        return
+        return None
     model.eval()
     correct = 0
     total = 0
@@ -124,30 +125,56 @@ def evaluate_model(model):
             preds = model.predict(inputs)
             correct += (preds == labels).sum().item()
             total += labels.size(0)
+            
+            #Collect data for Metrics
             y_true.extend(labels.cpu().numpy().flatten())
             y_pred.extend(preds.cpu().numpy().flatten())
-    print(f"\nFinal Test Accuracy: {100 * correct / total:.2f}%")
+            
+    #Calculate Metrics
+    acc = 100 * correct / total
+    f1 = f1_score(y_true, y_pred)
+    cm = confusion_matrix(y_true, y_pred)
+
+    print(f"\nFinal Test Evaluation:")
+    print(f"Accuracy: {acc:.2f}%")
+    print(f"F1 Score: {f1:.4f}")
+
     #Save the model
     torch.save(model.state_dict(), "jazz_classical_classifier.pth")
+    
+    return cm
 
 if __name__ == "__main__":
     if not os.path.exists(PATHS['train']['classical']):
         print("NOTE: Real data files not found. Please ensure paths in 'PATHS' config match your file system.")
     else:
         trained_model, loss_history, acc_history = train_model()
-        evaluate_model(trained_model)
+        conf_matrix = evaluate_model(trained_model)
+        
+        #Plotting
+        plt.figure(figsize=(15, 5)) # Increased size for 3 panels
+
         #Plotting loss
-        plt.figure(figsize=(10, 4))
-        plt.subplot(1, 2, 1)
+        plt.subplot(1, 3, 1)
         plt.plot(loss_history, label='Train Loss')
         plt.title('Training Loss')
         plt.xlabel('Epoch')
         plt.legend()
+        
         #Validation accuracy -- fluctuates a fair bit but all very high
-        plt.subplot(1, 2, 2)
+        plt.subplot(1, 3, 2)
         plt.plot(acc_history, label='Val Accuracy', color='orange')
         plt.title('Validation Accuracy')
         plt.xlabel('Epoch')
         plt.legend()
+
+        #Confusion Matrix
+        if conf_matrix is not None:
+            ax3 = plt.subplot(1, 3, 3)
+            # Labels based on your #Classical=0, #Jazz=1 comments
+            disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix, display_labels=['Classical', 'Jazz'])
+            disp.plot(ax=ax3, cmap='Blues', colorbar=False)
+            plt.title('Confusion Matrix')
+
         plt.tight_layout()
         plt.show()
