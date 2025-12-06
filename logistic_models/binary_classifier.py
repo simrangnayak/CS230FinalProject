@@ -7,14 +7,14 @@ from sklearn.metrics import f1_score, confusion_matrix, ConfusionMatrixDisplay
 import os
 
 PATHS = {'train': {
-        'classical': 'train_classical_latents (1).pt',
-        'jazz': 'train_jazz_latents (1).pt'},
+        'classical': 'latents/train_classical_latents.pt',
+        'jazz': 'latents/train_jazz_latents.pt'},
     'val': {
-        'classical': 'val_classical_latents (1).pt',
-        'jazz': 'val_jazz_latents (1).pt'},
+        'classical': 'latents/val_classical_latents.pt',
+        'jazz': 'latents/val_jazz_latents.pt'},
     'test': {
-        'classical': 'test_classical_latents (1).pt',
-        'jazz': 'test_jazz_latents (1).pt'}}
+        'classical': 'latents/test_classical_latents.pt',
+        'jazz': 'latents/test_jazz_latents.pt'}}
 
 BATCH_SIZE = 32
 LEARNING_RATE = 0.001
@@ -145,6 +145,7 @@ def evaluate_model(model):
     return cm
 
 if __name__ == "__main__":
+    torch.manual_seed(42)
     if not os.path.exists(PATHS['train']['classical']):
         print("NOTE: Real data files not found. Please ensure paths in 'PATHS' config match your file system.")
     else:

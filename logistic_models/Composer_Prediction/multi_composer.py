@@ -11,7 +11,27 @@ import numpy as np
 BATCH_SIZE = 64
 LEARNING_RATE = 0.005
 NUM_EPOCHS = 50
-DATA_DIR = "." 
+
+# old values: num_epochs = 50, learning_rate = 0.005, batch_size = 64
+
+# batch_size = 32, learning_rate = 0.001, num_epochs = 100
+# Final Test Accuracy: 74.38%
+# Final Test F1 Score: 0.7364
+
+# batch_size = 32, learning_rate = 0.005, num_epochs = 100
+# Final Test Accuracy: 75.83%
+# Final Test F1 Score: 0.7566
+
+# batch_size = 32, learning_rate = 0.01, num_epochs = 100
+# Final Test Accuracy: 77.29%
+# Final Test F1 Score: 0.7701
+
+# batch_size = 64, learning_rate = 0.005, num_epochs = 100
+# Final Test Accuracy: 72.50%
+# Final Test F1 Score: 0.7143
+
+
+DATA_DIR = "latents" 
 
 DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {DEVICE}")
@@ -77,12 +97,23 @@ class ComposerClassifier(nn.Module):
         return self.linear(x)
 
 if __name__ == "__main__":
+    torch.manual_seed(42)
+
     composers = get_all_composers(DATA_DIR)
     composer_map = {name: i for i, name in enumerate(composers)}
     num_classes = len(composers)
     print(f"Found Composers: {composer_map}")
 
     X_train, y_train, X_val, y_val, X_test, y_test = load_and_split_data(composer_map)
+
+    for composer, idx in composer_map.items():
+        # print count in train, val, test
+        train_count = (y_train == idx).sum().item()
+        val_count = (y_val == idx).sum().item()
+        test_count = (y_test == idx).sum().item()
+        total_count = train_count + val_count + test_count
+        print(f"  {composer}: Train={train_count}, Val={val_count}, Test={test_count}, Total={total_count}")
+
     print(f"Data Split -> Train: {len(y_train)} | Val: {len(y_val)} | Test: {len(y_test)}")
     #Initialize model 
     model = ComposerClassifier(128, num_classes).to(DEVICE)

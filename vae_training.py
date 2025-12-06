@@ -5,6 +5,7 @@ from vae_octuples_hierarchical import OctupleVAE_HierarchicalDecoder
 import os
 from glob import glob
 import matplotlib.pyplot as plt
+import json
 
 # --- Dataset ---
 class OctupleDataset(Dataset):
@@ -56,16 +57,6 @@ __all__ = [
 
 
 def main():
-    # --- Hyperparameters ---
-    batch_size = 64
-    epochs = 3
-    embed_dim = 64
-    chunks = 4
-    hidden_dim = 256
-    latent_dims = [32, 64, 128]  # Different latent dimensions to experiment with
-    learning_rates = [1e-3]  # Different learning rates to experiment with
-    KL_weights = [0.5, 1.0]  # Different KL weights to experiment with
-
     # --- Load dataset ---
     train_classical = load_octuples_from_folder("train_octuples/classical_octuples")
     train_jazz = load_octuples_from_folder("train_octuples")
@@ -83,17 +74,18 @@ def main():
     #print(f"Loaded {len(test_sequences)} sequences for testing.")
     print(f"Loaded {len(val_sequences)} sequences for validation.")
 
-    val_dataset = OctupleDataset(val_sequences)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
-
     # --- Instantiate model ---
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # vocab sizes for each of the 8 channels
     vocab_sizes = [256, 128, 129, 256, 128, 33, 128, 49]
+    batch_size = 64
 
     # Read in datasets
     train_dataset = OctupleDataset(train_sequences)
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+
+    val_dataset = OctupleDataset(val_sequences)
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
 
 # ---- Training Hierarchical Model ----
 
@@ -201,7 +193,7 @@ def main():
               f"| Recon Loss: {test_recon/len(val_dataloader):.4f} | KL Loss: {test_kl/len(val_dataloader):.4f}")
 
         # --- Write losses to CSV ---
-        csv_path = "hierarchical_epoch_losses.csv"
+        csv_path = "vae_hierarchical_params/hierarchical_final_epoch_losses.csv"
         header = "epoch,train_loss,train_recon,train_kl,test_loss,test_recon,test_kl\n"
         row = f"{epoch+1},{avg_train_loss:.6f},{avg_recon:.6f},{avg_kl:.6f},{avg_test_loss:.6f},{avg_test_recon:.6f},{avg_test_kl:.6f}\n"
         if epoch == 0 and not os.path.exists(csv_path):
@@ -214,12 +206,11 @@ def main():
 
         # Hierarchical checkpoint every 5 epochs
         if (epoch + 1) % 5 == 0:
-            ckpt_path = f"vae_hierarchical_large_epoch{epoch+1}_new.pt"
+            ckpt_path = f"vae_hierarchical_params/vae_hierarchical_final_epoch{epoch+1}.pt"
             torch.save(hierarchical_vae.state_dict(), ckpt_path)
             print(f"  → Hierarchical checkpoint saved: {ckpt_path}")
 
     # save training history
-    import json
     history = {
         "train_losses": hierarchical_train_losses,
         "val_losses": hierarchical_test_losses,
@@ -228,11 +219,10 @@ def main():
         "val_recon_losses": hierarchical_test_recon_losses,
         "val_kl_losses": hierarchical_test_kl_losses,
     }
-    with open("hierarchical_large_history_new.json", "w") as f:
+    with open("vae_hierarchical_params/hierarchical_final_history.json", "w") as f:
         json.dump(history, f, indent=2)
 
-    torch.save(hierarchical_vae.state_dict(), "vae_hierarchical_large_new.pt")
-
+    torch.save(hierarchical_vae.state_dict(), "vae_hierarchical_params/vae_hierarchical_final.pt")
 
 if __name__ == '__main__':
     main()

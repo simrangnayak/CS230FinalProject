@@ -9,7 +9,8 @@ from vae_training import OctupleDataset, load_octuples_from_folder, collate_fn
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 VOCAB_SIZES = [256, 128, 129, 256, 128, 33, 128, 49]
-MODEL_PATH = os.environ.get("VAE_MODEL_PATH", "vae_hierarchical_large.pt")  # override with env var if needed
+# MODEL_PATH = os.environ.get("VAE_MODEL_PATH", "vae_hierarchical_finetune_best_final.pt")  # override with env var if needed
+MODEL_PATH = os.environ.get("VAE_MODEL_PATH", "vae_hierarchical_params/vae_hierarchical_finetune_best.pt")  # override with env var if needed
 
 SPLITS = {
     "train_jazz": "train_octuples",
@@ -63,7 +64,16 @@ def pairwise_distance_summary(a: torch.Tensor, b: torch.Tensor, sample_cap=2000)
 def main():
     print(f"Loading VAE model from {MODEL_PATH}")
     vae = OctupleVAE_HierarchicalDecoder(vocab_sizes=VOCAB_SIZES, embed_dim=64, hidden_dim=256, latent_dim=128, chunks=8, device=DEVICE)
-    vae.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+    
+    # Load checkpoint and extract model weights
+    checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
+    if isinstance(checkpoint, dict) and "model" in checkpoint:
+        vae.load_state_dict(checkpoint["model"])
+        print(f"Loaded model from checkpoint (epoch {checkpoint.get('epoch', 'unknown')})")
+    else:
+        vae.load_state_dict(checkpoint)
+        print("Loaded model weights directly")
+    
     vae.to(DEVICE)
     vae.eval()
 

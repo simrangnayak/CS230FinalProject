@@ -2,6 +2,13 @@ import torch
 import sys
 import os
 import random
+import numpy as np
+import matplotlib.pyplot as plt
+from collections import Counter
+import librosa
+import librosa.display
+from scipy.io.wavfile import write
+import pretty_midi
 
 from musicbert.preprocess import encoding_to_MIDI
 from vae_octuples import OctupleVAE
@@ -26,10 +33,299 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # vocab sizes for each of the 8 channels
 vocab_sizes = [256, 128, 129, 256, 128, 33, 128, 49]
 
+def plot_musical_comparison(original_seq, diffused_seq, save_path="musical_comparison.png"):
+    """Create visual comparison plots of octuple distributions between original and style-transferred sequences
+    Note that this code was created with help from ChatGPT
+    """
+    orig = original_seq.cpu().numpy()
+    diff = diffused_seq.cpu().numpy()
+    
+    # Flatten for plotting
+    orig_flat = orig.reshape(-1, orig.shape[-1])
+    diff_flat = diff.reshape(-1, diff.shape[-1])
+    
+    # Channel names for clarity
+    channel_names = ['Measure', 'Position', 'Program', 'Pitch', 'Duration', 'Velocity', 'TimeSig', 'Tempo']
+    
+    # Create 2x4 subplot for all 8 octuple channels
+    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+    axes = axes.flatten()  # Make it easier to iterate
+    
+    for i in range(8):
+        # Plot histogram for each channel
+        axes[i].hist(orig_flat[:, i], alpha=0.7, label='Original Classical', bins=min(30, len(np.unique(orig_flat[:, i]))), color='blue', density=True)
+        axes[i].hist(diff_flat[:, i], alpha=0.7, label='Style Transferred', bins=min(30, len(np.unique(diff_flat[:, i]))), color='red', density=True)
+        
+        axes[i].set_title(f'{channel_names[i]} Distribution')
+        axes[i].set_xlabel(f'{channel_names[i]} Value')
+        axes[i].set_ylabel('Density')
+        axes[i].legend()
+        axes[i].grid(True, alpha=0.3)
+        
+        orig_mean = orig_flat[:, i].mean()
+        diff_mean = diff_flat[:, i].mean()
+        orig_std = orig_flat[:, i].std()
+        diff_std = diff_flat[:, i].std()
+        
+        stats_text = f'Orig: μ={orig_mean:.1f}, σ={orig_std:.1f}\nTransf: μ={diff_mean:.1f}, σ={diff_std:.1f}'
+        axes[i].text(0.02, 0.98, stats_text, transform=axes[i].transAxes, 
+                    verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
+                    fontsize=9)
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    print(f"Saved octuple distribution comparison to {save_path}")
+    
+    print("\nDetailed Octuple Statistics:")
+    print("-" * 50)
+    for i, name in enumerate(channel_names):
+        orig_vals = orig_flat[:, i]
+        diff_vals = diff_flat[:, i]
+        
+        print(f"{name:10} | Orig: mean={orig_vals.mean():6.2f}, std={orig_vals.std():6.2f}, range=[{orig_vals.min():3.0f}, {orig_vals.max():3.0f}]")
+        print(f"{'':10} | Diff: mean={diff_vals.mean():6.2f}, std={diff_vals.std():6.2f}, range=[{diff_vals.min():3.0f}, {diff_vals.max():3.0f}]")
+        print(f"{'':<10} | Change: Δμ={diff_vals.mean()-orig_vals.mean():+6.2f}, Δσ={diff_vals.std()-orig_vals.std():+6.2f}")
+        print("-" * 50)
+
+
+def plot_spectrogram_comparison(original_midi_file, transferred_midi_file, save_path="spectrogram_comparison.png"):
+    """Create spectrogram comparison between original and style-transferred MIDI
+    
+    Note that this code was created with help from ChatGPT
+    """
+    try:
+        # Load MIDI files and convert to audio
+        def midi_to_audio(midi_file, sr=22050, duration=30):
+            """Convert MIDI file to audio array"""
+            try:
+                midi = pretty_midi.PrettyMIDI(midi_file)
+                print(f"  MIDI file: {midi_file}")
+                print(f"    Total time: {midi.get_end_time():.2f}s")
+                print(f"    Number of instruments: {len(midi.instruments)}")
+                
+                total_notes = sum(len(inst.notes) for inst in midi.instruments)
+                print(f"    Total notes: {total_notes}")
+                
+                if total_notes == 0:
+                    print(f"    ⚠️  WARNING: No notes found in {midi_file}")
+                    return None, sr
+                
+                # Show note ranges for debugging
+                if total_notes > 0:
+                    all_pitches = [note.pitch for inst in midi.instruments for note in inst.notes]
+                    all_velocities = [note.velocity for inst in midi.instruments for note in inst.notes]
+                    print(f"    Pitch range: {min(all_pitches)} - {max(all_pitches)}")
+                    print(f"    Velocity range: {min(all_velocities)} - {max(all_velocities)}")
+                
+                # Synthesize audio (first 30 seconds to keep manageable)
+                try:
+                    # Try FluidSynth with basic parameters (pretty_midi doesn't support synth_kwargs)
+                    audio = midi.fluidsynth(fs=sr)
+                    print(f"    FluidSynth synthesis successful")
+                except Exception as synth_error:
+                    print(f"    ⚠️  FluidSynth failed: {synth_error}")
+                    print(f"    Trying alternative synthesis method...")
+                    
+                    # Fallback: Create simple sine wave synthesis
+                    audio_length = int(min(duration, midi.get_end_time()) * sr)
+                    audio = np.zeros(audio_length)
+                    
+                    print(f"    Synthesizing {len(midi.instruments)} instruments...")
+                    
+                    for inst_idx, instrument in enumerate(midi.instruments):
+                        print(f"      Instrument {inst_idx}: {len(instrument.notes)} notes")
+                        
+                        for note_idx, note in enumerate(instrument.notes):
+                            if note.end > duration:
+                                continue
+                                
+                            start_sample = int(note.start * sr)
+                            end_sample = int(min(note.end * sr, audio_length))
+                            
+                            if start_sample < audio_length and end_sample > start_sample:
+                                # Generate simple sine wave for this note
+                                freq = 440 * (2 ** ((note.pitch - 69) / 12))  # A4 = 440Hz
+                                note_duration = (end_sample - start_sample) / sr
+                                t = np.linspace(0, note_duration, end_sample - start_sample)
+                                
+                                # Better envelope and amplitude
+                                envelope = np.exp(-t * 1.5)  # Decay envelope
+                                amplitude = 0.05 * (note.velocity / 127)  # Amplitude from velocity
+                                sine_wave = amplitude * envelope * np.sin(2 * np.pi * freq * t)
+                                
+                                # Add to audio with bounds checking
+                                end_idx = min(start_sample + len(sine_wave), len(audio))
+                                sine_len = end_idx - start_sample
+                                if sine_len > 0:
+                                    audio[start_sample:end_idx] += sine_wave[:sine_len]
+                    
+                    print(f"    Fallback synthesis complete, checking audio...")
+                    if len(audio) == 0:
+                        print(f"    ❌ Generated empty audio array")
+                        return None, sr
+                    
+                    # Check if we actually generated any sound
+                    audio_max = np.max(np.abs(audio))
+                    print(f"    Generated audio max amplitude: {audio_max:.6f}")
+                    
+                    if audio_max < 1e-8:
+                        print(f"    ❌ Generated audio is too quiet")
+                        # Try a simpler approach - just make some test tones
+                        print(f"    Creating test tones based on note data...")
+                        audio = np.zeros(audio_length)
+                        
+                        # Create simple test tones for first few notes
+                        test_notes = []
+                        for instrument in midi.instruments:
+                            test_notes.extend(instrument.notes[:10])  # First 10 notes per instrument
+                        
+                        for i, note in enumerate(test_notes[:50]):  # Max 50 test notes
+                            if note.start > duration:
+                                continue
+                            start_sample = int(note.start * sr)
+                            # Make each note 0.5 seconds long
+                            duration_samples = int(0.5 * sr)
+                            end_sample = min(start_sample + duration_samples, audio_length)
+                            
+                            if start_sample < audio_length:
+                                freq = 440 * (2 ** ((note.pitch - 69) / 12))
+                                t = np.linspace(0, 0.5, duration_samples)
+                                envelope = np.exp(-t * 2)
+                                sine_wave = 0.1 * envelope * np.sin(2 * np.pi * freq * t)
+                                
+                                end_idx = min(start_sample + len(sine_wave), len(audio))
+                                sine_len = end_idx - start_sample
+                                if sine_len > 0:
+                                    audio[start_sample:end_idx] += sine_wave[:sine_len]
+                        
+                        final_max = np.max(np.abs(audio))
+                        print(f"    Test tone generation: max amplitude = {final_max:.6f}")
+                    
+                    # Normalize audio to prevent clipping
+                    if np.max(np.abs(audio)) > 0:
+                        audio = audio / np.max(np.abs(audio)) * 0.8
+                
+                # Check audio quality
+                if len(audio) == 0:
+                    print(f"    ⚠️  WARNING: Audio synthesis produced empty array")
+                    return None, sr
+                    
+                audio_rms = np.sqrt(np.mean(audio**2))
+                print(f"    Audio RMS: {audio_rms:.6f}")
+                print(f"    Audio length: {len(audio)/sr:.2f}s, Max: {np.max(np.abs(audio)):.6f}")
+                
+                if audio_rms < 1e-6:
+                    print(f"    ⚠️  WARNING: Audio is essentially silent (RMS < 1e-6)")
+                
+                # Trim to specified duration
+                max_samples = sr * duration
+                if len(audio) > max_samples:
+                    print(f"    Trimming audio from {len(audio)/sr:.2f}s to {duration}s")
+                    audio = audio[:max_samples]
+                    
+                    # Check audio after trimming
+                    trimmed_rms = np.sqrt(np.mean(audio**2))
+                    print(f"    After trimming - RMS: {trimmed_rms:.6f}, Max: {np.max(np.abs(audio)):.6f}")
+                else:
+                    print(f"    No trimming needed - audio is {len(audio)/sr:.2f}s")
+                
+                return audio, sr
+                
+            except Exception as e:
+                print(f"    ❌ Error converting {midi_file} to audio: {e}")
+                return None, sr
+        
+        print("Converting MIDI files to audio...")
+        
+        # Convert both MIDI files to audio
+        orig_audio, sr = midi_to_audio(original_midi_file)
+        trans_audio, _ = midi_to_audio(transferred_midi_file)
+        
+        if orig_audio is None or trans_audio is None:
+            print("Could not generate spectrograms - MIDI to audio conversion failed")
+            return
+        
+        print(f"\nAfter MIDI conversion:")
+        print(f"  Original: {len(orig_audio)} samples, RMS: {np.sqrt(np.mean(orig_audio**2)):.6f}")
+        print(f"  Transferred: {len(trans_audio)} samples, RMS: {np.sqrt(np.mean(trans_audio**2)):.6f}")
+        
+        # Ensure both audio arrays have the same length
+        min_len = min(len(orig_audio), len(trans_audio))
+        print(f"  Trimming both to {min_len} samples ({min_len/sr:.2f}s)")
+        
+        orig_audio = orig_audio[:min_len]
+        trans_audio = trans_audio[:min_len]
+        
+        print(f"\nAfter length matching:")
+        print(f"  Original: RMS: {np.sqrt(np.mean(orig_audio**2)):.6f}, Max: {np.max(np.abs(orig_audio)):.6f}")
+        print(f"  Transferred: RMS: {np.sqrt(np.mean(trans_audio**2)):.6f}, Max: {np.max(np.abs(trans_audio)):.6f}")
+        
+        # Check if transferred audio is all zeros
+        if np.all(trans_audio == 0):
+            print(f"  ❌ Transferred audio is all zeros!")
+        elif np.std(trans_audio) < 1e-10:
+            print(f"  ❌ Transferred audio has near-zero variance!")
+        else:
+            print(f"  ✅ Transferred audio has valid content")
+            print(f"    Non-zero samples: {np.count_nonzero(trans_audio)}/{len(trans_audio)}")
+            print(f"    Sample values range: [{trans_audio.min():.6f}, {trans_audio.max():.6f}]")
+        
+        # Additional audio debugging
+        print(f"\nAudio Quality Check:")
+        print(f"  Original audio: max={np.max(np.abs(orig_audio)):.4f}, std={np.std(orig_audio):.4f}")
+        print(f"  Transferred audio: max={np.max(np.abs(trans_audio)):.4f}, std={np.std(trans_audio):.4f}")
+        
+        # Compute spectrograms
+        orig_stft = librosa.stft(orig_audio, n_fft=2048, hop_length=512)
+        trans_stft = librosa.stft(trans_audio, n_fft=2048, hop_length=512)
+        
+        # Convert to magnitude (dB)
+        orig_spec_db = librosa.amplitude_to_db(np.abs(orig_stft), ref=np.max)
+        trans_spec_db = librosa.amplitude_to_db(np.abs(trans_stft), ref=np.max)
+        
+        print(f"  Spectrogram ranges: orig [{orig_spec_db.min():.1f}, {orig_spec_db.max():.1f}] dB")
+        print(f"                      trans [{trans_spec_db.min():.1f}, {trans_spec_db.max():.1f}] dB")
+        
+        # Create comparison plot
+        fig, axes = plt.subplots(2, 1, figsize=(15, 10))
+        
+        # Original spectrogram
+        img1 = librosa.display.specshow(orig_spec_db, sr=sr, hop_length=512, 
+                                       x_axis='time', y_axis='hz', ax=axes[0])
+        axes[0].set_title('Original Classical - Spectrogram')
+        axes[0].set_ylabel('Frequency (Hz)')
+        plt.colorbar(img1, ax=axes[0], format='%+2.0f dB')
+        
+        # Style transferred spectrogram  
+        img2 = librosa.display.specshow(trans_spec_db, sr=sr, hop_length=512,
+                                       x_axis='time', y_axis='hz', ax=axes[1])
+        axes[1].set_title('Style Transferred Jazz - Spectrogram')
+        axes[1].set_xlabel('Time (s)')
+        axes[1].set_ylabel('Frequency (Hz)')
+        plt.colorbar(img2, ax=axes[1], format='%+2.0f dB')
+        
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.show()
+        print(f"Saved spectrogram comparison to {save_path}")
+        
+        # Print some audio statistics
+        print(f"\nAudio Analysis:")
+        print(f"  Audio length: {len(orig_audio)/sr:.2f} seconds")
+        print(f"  Sample rate: {sr} Hz")
+        print(f"  Original RMS: {np.sqrt(np.mean(orig_audio**2)):.4f}")
+        print(f"  Transferred RMS: {np.sqrt(np.mean(trans_audio**2)):.4f}")
+        
+    except ImportError as e:
+        print(f"Missing required libraries for spectrogram: {e}")
+        print("Please install: pip install librosa pretty_midi")
+    except Exception as e:
+        print(f"Error creating spectrogram: {e}")
+
 
 # Load a real classical test piece and encode it
-
-with open("test_octuples/classical_octuples/cambini_midi_test.txt") as f:
+with open("test_octuples/classical_octuples/bach_midi_test.txt") as f:
     lines = f.readlines()
     test_seq = random.choice(lines).strip()
 
@@ -61,7 +357,7 @@ if padded_len != original_len:
 
 
 vae = OctupleVAE_HierarchicalDecoder(vocab_sizes=vocab_sizes, embed_dim=64, hidden_dim=256, latent_dim=128, chunks=8, device=device)
-vae.load_state_dict(torch.load("vae_hierarchical_finetune_best.pt", map_location=device)["model"])
+vae.load_state_dict(torch.load("vae_hierarchical_params/vae_hierarchical_finetune_best.pt", map_location=device)["model"])
 vae.eval()
 
 
@@ -185,22 +481,29 @@ print(f"Jazz:      {jazz_style_latent[0, :10].cpu().numpy()}")
 
 
 # Decode jazz-style latent to MIDI using prefix from random jazz octuple
-jazz_octuples = load_octuples_from_folder("test_octuples")
-if not jazz_octuples:
-    print("No jazz octuples found! Using classical sequence as prefix instead.")
-    random_jazz_octuple = octuples  # Use the original classical sequence
-else:
-    random_jazz_octuple = random.choice(jazz_octuples)
-jazz_len = len(random_jazz_octuple)
-print(f"\nUsing jazz piece of length {jazz_len} for prefix.")
-jazz_seq = torch.tensor(random_jazz_octuple).unsqueeze(0).to(device)  # [1, jazz_len, 8]
+# jazz_octuples = load_octuples_from_folder("test_octuples")
+# if not jazz_octuples:
+#     print("No jazz octuples found! Using classical sequence as prefix instead.")
+#     random_jazz_octuple = octuples  # Use the original classical sequence
+# else:
+#     random_jazz_octuple = random.choice(jazz_octuples)
+# jazz_len = len(random_jazz_octuple)
+# print(f"\nUsing jazz piece of length {jazz_len} for prefix.")
+# jazz_seq = torch.tensor(random_jazz_octuple).unsqueeze(0).to(device)  # [1, jazz_len, 8]
 
-jazz_len = jazz_seq.size(1)
-prefix_len = min(jazz_len // 2, jazz_len)
-x_prefix = jazz_seq[:, :prefix_len, :]
+# jazz_len = jazz_seq.size(1)
+# prefix_len = min(jazz_len // 2, jazz_len)
+# x_prefix = jazz_seq[:, :prefix_len, :]
+
+# decode jazz-style latent to MIDI using prefix from classical piece
+prefix_len = min(seq.size(1) // 4, seq.size(1))
+x_prefix = seq[:, :prefix_len, :]
+
+use_seq_len = seq_len # change to jazz_len if using jazz prefix
+
 with torch.no_grad():
-    # Use autoregressive decoding (same as classical)
-    outputs = vae.decode(jazz_style_latent, seq_len=jazz_len, autoregressive=True, x_prefix=x_prefix)
+    # Use autoregressive decoding (same as classical) using no prefix
+    outputs = vae.decode(jazz_style_latent, seq_len=use_seq_len, autoregressive=True, x_prefix=None)
     
     print(f"Decoder output shapes: {[out.shape for out in outputs]}")
     
@@ -272,4 +575,28 @@ print(f"Sample output tuples (first 3): {decoded_tuples[:3]}")
 midi_obj = encoding_to_MIDI(decoded_tuples)
 midi_obj.dump("style_transferred_jazz.mid")
 print(f"Generated style_transferred_jazz.mid with {len(decoded_tuples)} octuples")
+
+# ==================== QUALITATIVE ANALYSIS ====================
+print("\n" + "="*50)
+print("QUALITATIVE ANALYSIS: ORIGINAL vs STYLE TRANSFERRED")
+print("="*50)
+
+# Convert sequences to tensors for analysis
+original_tensor = seq  # Original sequence [1, seq_len, 8]
+transferred_tensor = torch.tensor(decoded_tuples).unsqueeze(0).to(device)  # [1, seq_len, 8]
+
+# Ensure same length for comparison
+min_len = min(original_tensor.size(1), transferred_tensor.size(1))
+original_tensor = original_tensor[:, :min_len, :]
+transferred_tensor = transferred_tensor[:, :min_len, :]
+
+print(f"Comparing sequences of length: {min_len}")
+
+plot_musical_comparison(original_tensor, transferred_tensor, "style_transfer_comparison.png")
+
+# 5. Spectrogram Comparison
+print("\n5. CREATING SPECTROGRAM COMPARISON:")
+print("-" * 35)
+plot_spectrogram_comparison("reconstructed_diffusion.mid", "style_transferred_jazz.mid", "spectrogram_comparison_noprefix.png")
+
 print("\nDone! Compare reconstructed_diffusion.mid (original) vs style_transferred_jazz.mid (jazz style)")

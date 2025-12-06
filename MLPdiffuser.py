@@ -184,12 +184,12 @@ def main():
     posterior_variance = betas * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod)
 
     # Load latents saved from saving_latents.py
-    train_jazz_latents = torch.load("latents/train_jazz_latents.pt")  # [num_pieces, latent_dim]
-    train_classical_latents = torch.load("latents/train_classical_latents.pt")  # [num_pieces, latent_dim]
-    val_jazz_latents = torch.load("latents/val_jazz_latents.pt")  # [num_pieces, latent_dim]
-    val_classical_latents = torch.load("latents/val_classical_latents.pt")  # [num_pieces, latent_dim]
-    test_jazz_latents = torch.load("latents/test_jazz_latents.pt")  # [num_pieces, latent_dim]
-    test_classical_latents = torch.load("latents/test_classical_latents.pt")  # [num_pieces, latent_dim]
+    train_jazz_latents = torch.load("new_latents/train_jazz_latents.pt")  # [num_pieces, latent_dim]
+    train_classical_latents = torch.load("new_latents/train_classical_latents.pt")  # [num_pieces, latent_dim]
+    val_jazz_latents = torch.load("new_latents/val_jazz_latents.pt")  # [num_pieces, latent_dim]
+    val_classical_latents = torch.load("new_latents/val_classical_latents.pt")  # [num_pieces, latent_dim]
+    test_jazz_latents = torch.load("new_latents/test_jazz_latents.pt")  # [num_pieces, latent_dim]
+    test_classical_latents = torch.load("new_latents/test_classical_latents.pt")  # [num_pieces, latent_dim]
     print("loaded latents")
     print("Training jazz latents shape:", train_jazz_latents.shape)
     print("Training classical latents shape:", train_classical_latents.shape)
@@ -271,7 +271,7 @@ def main():
             best_val_loss = avg_val_loss
             patience_counter = 0
             # Save best model
-            torch.save(model.state_dict(), "diffuser_params/mlp_diffuser_best_small.pt")
+            torch.save(model.state_dict(), "diffuser_params/mlp_diffuser_new_best.pt")
             print(f"  → New best model saved!")
         else:
             patience_counter += 1
@@ -279,10 +279,10 @@ def main():
             if patience_counter >= patience:
                 print(f"Early stopping triggered after {epoch+1} epochs")
                 break    # Save final model (and copy best as default)
-    torch.save(model.state_dict(), "diffuser_params/mlp_diffuser_final_small.pt")
+
     # Save losses for plotting as csv
-    np.savetxt("diffuser_params/mlp_diffuser_train_losses_small.csv", np.array(train_losses), delimiter=",")
-    np.savetxt("diffuser_params/mlp_diffuser_val_losses_small.csv", np.array(val_losses), delimiter=",")
+    np.savetxt("diffuser_params/mlp_diffuser_train_losses_new.csv", np.array(train_losses), delimiter=",")
+    np.savetxt("diffuser_params/mlp_diffuser_val_losses_new.csv", np.array(val_losses), delimiter=",")
 
 if __name__ == "__main__":
     main()

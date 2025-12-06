@@ -39,19 +39,19 @@ if padded_len != original_len:
     seq = torch.cat([seq, padding], dim=1)
     print(f"Padded sequence from {original_len} to {padded_len}")
 
-vae_no_finetune = OctupleVAE_HierarchicalDecoder(vocab_sizes=vocab_sizes, embed_dim=64, hidden_dim=256, latent_dim=128, chunks=8, device=device)
-vae_no_finetune.load_state_dict(torch.load("vae_hierarchical_large.pt", map_location=device))
-vae_no_finetune.eval()
+vae_jazz_only = OctupleVAE_HierarchicalDecoder(vocab_sizes=vocab_sizes, embed_dim=64, hidden_dim=256, latent_dim=128, chunks=8, device=device)
+vae_jazz_only.load_state_dict(torch.load("vae_hierarchical_params/vae_hierarchical_finetune_best.pt", map_location=device)["model"])
+vae_jazz_only.eval()
 
 vae_finetune = OctupleVAE_HierarchicalDecoder(vocab_sizes=vocab_sizes, embed_dim=64, hidden_dim=256, latent_dim=128, chunks=8, device=device)
-vae_finetune.load_state_dict(torch.load("vae_hierarchical_finetune_best.pt", map_location=device)["model"])
+vae_finetune.load_state_dict(torch.load("vae_hierarchical_finetune_best_final.pt", map_location=device)["model"])
 vae_finetune.eval()
 
 # --- Deterministic reconstruction ---
 with torch.no_grad():
-    mu, logvar = vae_no_finetune.encode(seq)
+    mu, logvar = vae_jazz_only.encode(seq)
     z = mu  # use mean for deterministic output
-    outputs = vae_no_finetune.decode(z, seq_len=seq.size(1), x=seq, autoregressive=False)
+    outputs = vae_jazz_only.decode(z, seq_len=seq.size(1), x=seq, autoregressive=False)
 
     mu_finetune, logvar_finetune = vae_finetune.encode(seq)
     z_finetune = mu_finetune  # use mean for deterministic output
@@ -86,10 +86,9 @@ decoded_finetune_tuples = [clamp_tuple_vals(t) for t in decoded_finetune_tuples]
 
 # convert to MIDI and save
 midi_obj = encoding_to_MIDI(decoded_tuples)
-midi_obj.dump("reconstructed_no_finetune.mid")
-
-midi_obj = encoding_to_MIDI(decoded_finetune_tuples)
 midi_obj.dump("reconstructed_finetune.mid")
+midi_obj = encoding_to_MIDI(decoded_finetune_tuples)
+midi_obj.dump("reconstructed_finetune_final.mid")
 
 
 # --- Autoregressive generation from latent (longer prefix for stability) ---
@@ -98,18 +97,19 @@ generation_len = seq.size(1)  # Use actual padded length
 prefix_len = min(generation_len // 2, seq_len)
 x_prefix = seq[:, :prefix_len, :]
 print(f"Using prefix length: {prefix_len}, generating length: {generation_len}")
+print(f"PREFIX BOUNDARY: prefix_len = {prefix_len}, generation begins at token {prefix_len}")
 
 with torch.no_grad():
     # Use the learned mean as latent for coherent generation
     z = mu  # [1, latent_dim]
-    # Warm-up with a longer prefix and use first frame as start token
-    ar_outputs = vae_no_finetune.decode(
+    # # Warm-up with a longer prefix and use first frame as start token
+    ar_outputs = vae_jazz_only.decode(
         z,
         seq_len=generation_len,
         autoregressive=True,
         x_prefix=x_prefix,
-        temperature=1.0,
-        top_k=None
+        temperature=0.7,
+        top_k=8
     )
 
     z_finetune = mu_finetune
@@ -118,8 +118,8 @@ with torch.no_grad():
         seq_len=generation_len,
         autoregressive=True,
         x_prefix=x_prefix,
-        temperature=1.0,
-        top_k=None
+        temperature=0.7,
+        top_k=8
     )
 
 ar_decoded = []
@@ -140,53 +140,77 @@ ar_decoded_finetune = list(zip(*ar_decoded_finetune))
 ar_decoded_finetune_tuples = [tuple(x) for x in ar_decoded_finetune]
 ar_decoded_finetune_tuples = [clamp_tuple_vals(t) for t in ar_decoded_finetune_tuples]
 
-encoding_to_MIDI(ar_decoded_tuples).dump("generated_from_mu_ar.mid")
-encoding_to_MIDI(ar_decoded_finetune_tuples).dump("generated_from_mu_finetune_ar.mid")
+# Print comparison between prefix and generated portions
+print(f"\n=== PREFIX vs GENERATED ANALYSIS ===")
+print(f"Prefix length: {prefix_len}, Total length: {len(ar_decoded_finetune_tuples)}")
+print(f"Prefix (tokens 0-{prefix_len-1}):")
+for i in range(min(5, prefix_len)):
+    print(f"  Token {i}: Original={octuples[i]} | AR={ar_decoded_finetune_tuples[i]}")
+
+print(f"Generated (tokens {prefix_len}-{prefix_len+4}):")
+for i in range(prefix_len, min(prefix_len + 5, len(ar_decoded_finetune_tuples))):
+    orig_val = octuples[i] if i < len(octuples) else "N/A (padding)"
+    print(f"  Token {i}: Original={orig_val} | AR={ar_decoded_finetune_tuples[i]}")
+
+encoding_to_MIDI(ar_decoded_tuples).dump("generated_from_mu_finetune_ar.mid")
+encoding_to_MIDI(ar_decoded_finetune_tuples).dump("generated_from_mu_finetune_ar_final.mid")
 
 
-# --- Pure prior-sampled generation ---
-with torch.no_grad():
-    # Sample z ~ N(0, I) for unconditional generation
-    z_prior = torch.randn_like(mu)
-    # Use same 16-token prefix for stability
-    prior_outputs = vae_no_finetune.decode(
-        z_prior,
-        seq_len=generation_len,
-        autoregressive=True,
-        x_prefix=x_prefix,
-        temperature=1.2,
-        top_k=12
-    )
+# # --- Pure prior-sampled generation ---
+# with torch.no_grad():
+#     # Sample z ~ N(0, I) for unconditional generation
+#     z_prior = torch.randn_like(mu_finetune)  # [1, latent_dim]
+#     # Use same 16-token prefix for stability
+#     # prior_outputs = vae_no_finetune.decode(
+#     #     z_prior,
+#     #     seq_len=generation_len,
+#     #     autoregressive=True,
+#     #     x_prefix=x_prefix,
+#     #     temperature=1.2,
+#     #     top_k=12
+#     # )
 
-    prior_outputs_finetune = vae_finetune.decode(
-        z_prior,
-        seq_len=generation_len,
-        autoregressive=True,
-        x_prefix=x_prefix,
-        temperature=1.2,
-        top_k=12
-    )
+#     prior_outputs_finetune = vae_finetune.decode(
+#         z_prior,
+#         seq_len=generation_len,
+#         autoregressive=True,
+#         x_prefix=x_prefix,
+#         temperature=0.9,
+#         top_k=16
+#     )
 
-prior_decoded = []
-for out in prior_outputs:
-    pred = torch.argmax(out, dim=-1)
-    prior_decoded.append(pred.squeeze(0).cpu().tolist())
+# # prior_decoded = []
+# # for out in prior_outputs:
+# #     pred = torch.argmax(out, dim=-1)
+# #     prior_decoded.append(pred.squeeze(0).cpu().tolist())
 
-prior_decoded_finetune = []
-for out in prior_outputs_finetune:
-    pred = torch.argmax(out, dim=-1)
-    prior_decoded_finetune.append(pred.squeeze(0).cpu().tolist())
+# prior_decoded_finetune = []
+# for out in prior_outputs_finetune:
+#     pred = torch.argmax(out, dim=-1)
+#     prior_decoded_finetune.append(pred.squeeze(0).cpu().tolist())
 
-prior_decoded = list(zip(*prior_decoded))
-prior_decoded_tuples = [tuple(x) for x in prior_decoded]
-prior_decoded_tuples = [clamp_tuple_vals(t) for t in prior_decoded_tuples]
+# # prior_decoded = list(zip(*prior_decoded))
+# # prior_decoded_tuples = [tuple(x) for x in prior_decoded]
+# # prior_decoded_tuples = [clamp_tuple_vals(t) for t in prior_decoded_tuples]
 
-prior_decoded_finetune = list(zip(*prior_decoded_finetune))
-prior_decoded_finetune_tuples = [tuple(x) for x in prior_decoded_finetune]
-prior_decoded_finetune_tuples = [clamp_tuple_vals(t) for t in prior_decoded_finetune_tuples]
+# prior_decoded_finetune = list(zip(*prior_decoded_finetune))
+# prior_decoded_finetune_tuples = [tuple(x) for x in prior_decoded_finetune]
+# prior_decoded_finetune_tuples = [clamp_tuple_vals(t) for t in prior_decoded_finetune_tuples]
 
-encoding_to_MIDI(prior_decoded_tuples).dump("generated_from_prior_ar.mid")
-encoding_to_MIDI(prior_decoded_finetune_tuples).dump("generated_from_prior_finetune_ar.mid")
+# # Print comparison between prefix and generated portions for prior sampling
+# print(f"\n=== PRIOR SAMPLING PREFIX vs GENERATED ANALYSIS ===")
+# print(f"Prefix length: {prefix_len}, Total length: {len(prior_decoded_finetune_tuples)}")
+# print(f"Prefix (tokens 0-{prefix_len-1}):")
+# for i in range(min(3, prefix_len)):
+#     print(f"  Token {i}: Original={octuples[i]} | Prior={prior_decoded_finetune_tuples[i]}")
+
+# print(f"Generated (tokens {prefix_len}-{prefix_len+4}):")
+# for i in range(prefix_len, min(prefix_len + 5, len(prior_decoded_finetune_tuples))):
+#     orig_val = octuples[i] if i < len(octuples) else "N/A (padding)"
+#     print(f"  Token {i}: Original={orig_val} | Prior={prior_decoded_finetune_tuples[i]}")
+
+# # encoding_to_MIDI(prior_decoded_tuples).dump("generated_from_prior_ar.mid")
+# encoding_to_MIDI(prior_decoded_finetune_tuples).dump("generated_from_prior_finetune_ar_final.mid")
 
 # # --- Sanitize helpers to avoid invalid MIDI data bytes ---
 # def clamp_tuple_vals(t):
