@@ -55,14 +55,6 @@ Raw MIDI files are converted to an 8-dimensional discrete token sequence:
 - Hidden layers: [512, 128] with batch normalization and dropout
 - Output: Noise prediction (128D, same as latent dimension)
 
-**Training Objective**:
-$\mathcal{L} = \mathbb{E}_{t,z_{\text{style}},z_{\text{content}},\epsilon}[\|\epsilon - \epsilon_\theta(z_t, t, z_{\text{content}})\|^2]$
-
-Where:
-- $z_t$ = noisy style latent at timestep $t$
-- $z_{\text{content}}$ = classical content latent (closest in L2 distance)
-- $\epsilon_\theta$ = learned noise predictor (diffusion model)
-
 **Diffusion Schedule**: 300 timesteps with linear beta schedule (0.0001 to 0.02)
 
 ## 📊 Datasets

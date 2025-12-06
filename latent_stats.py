@@ -65,6 +65,68 @@ def plot_pca(latents_dict, title="PCA of Latent Vectors", save_path="pca_latents
     print(f"Saved PCA plot to {save_path}")
 
 
+def plot_pca_by_composer(latents_dict, title="PCA of Latent Vectors by Composer", save_path="pca_latents_composers.png"):
+    """Plot PCA of latent vectors colored by individual composers"""
+    
+    # Load latent files from latents folder and extract composer names from filenames
+    all_latents = []
+    composer_labels = []
+    
+    # Look for all .pt files in latents folder that have composer names
+    for filepath in sorted(glob.glob(os.path.join(LATENTS_DIR, "*.pt"))):
+        filename = os.path.basename(filepath)
+        # Extract composer name from filename (e.g., "train_bach_latents.pt" -> "bach")
+        if os.path.exists(filepath):
+            try:
+                latents_data = torch.load(filepath, map_location=DEVICE)
+                if latents_data.size(0) > 0:
+                    # Extract composer from filename: split by '_', take middle part(s)
+                    parts = filename.replace('_latents.pt', '').split('_')
+                    # Skip first part (train/test/val) and last part if it's 'classical' or 'jazz'
+                    if parts[-1] in ['classical', 'jazz']:
+                        composer = '_'.join(parts[1:-1]) if len(parts) > 2 else parts[1]
+                    else:
+                        composer = '_'.join(parts[1:]) if len(parts) > 1 else parts[0]
+                    
+                    if composer and composer not in ['classical', 'jazz']:  # Skip if no composer found
+                        all_latents.append(latents_data)
+                        composer_labels.extend([composer] * latents_data.size(0))
+            except Exception as e:
+                print(f"Warning: Could not load {filepath}: {e}")
+    
+    if not all_latents:
+        print("No latents found in", LATENTS_DIR)
+        return
+    
+    all_latents = torch.cat(all_latents, dim=0)
+    
+    pca = PCA(n_components=2)
+    reduced = pca.fit_transform(all_latents.cpu().numpy())
+    
+    # Get unique composers and assign colors
+    unique_composers = list(set(composer_labels))
+    colors_map = plt.cm.get_cmap('tab20' if len(unique_composers) <= 20 else 'tab20b')
+    color_list = [colors_map(i / len(unique_composers)) for i in range(len(unique_composers))]
+    composer_colors = {comp: color_list[i] for i, comp in enumerate(unique_composers)}
+    
+    fig, ax = plt.subplots(figsize=(12, 8))
+    
+    # Plot each composer separately for proper legend
+    for composer in unique_composers:
+        mask = np.array([label == composer for label in composer_labels])
+        ax.scatter(reduced[mask, 0], reduced[mask, 1], 
+                  c=[composer_colors[composer]], alpha=0.6, label=composer, s=40)
+    
+    ax.set_title(title)
+    ax.set_xlabel(f"PCA Component 1 ({pca.explained_variance_ratio_[0]:.1%})")
+    ax.set_ylabel(f"PCA Component 2 ({pca.explained_variance_ratio_[1]:.1%})")
+    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=9)
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    print(f"Saved composer PCA plot to {save_path}")
+
+
 def gather_latents(vae, octuples_list, batch_size=64):
     dataset = OctupleDataset(octuples_list)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
@@ -157,6 +219,10 @@ def main():
     # PCA plot
     print("Generating PCA plot of latents...")
     plot_pca(latents, title="PCA of Latent Vectors (Jazz vs Classical)", save_path="pca_latents.png")
+    
+    # PCA plot by composer
+    print("\nGenerating PCA plot by composer...")
+    plot_pca_by_composer(latents, title="PCA of Latent Vectors by Composer", save_path="pca_latents_composers.png")
 
     print("\nDone. Use these stats to verify latent space is non-collapsed (std not ~0, ranges reasonable).")
 
