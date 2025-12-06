@@ -56,7 +56,7 @@ Raw MIDI files are converted to an 8-dimensional discrete token sequence:
 - Output: Noise prediction (128D, same as latent dimension)
 
 **Training Objective**:
-$$\mathcal{L} = \mathbb{E}_{t,z_{\text{style}},z_{\text{content}},\epsilon}[\|\epsilon - \epsilon_\theta(z_t, t, z_{\text{content}})\|^2]$$
+$\mathcal{L} = \mathbb{E}_{t,z_{\text{style}},z_{\text{content}},\epsilon}[\|\epsilon - \epsilon_\theta(z_t, t, z_{\text{content}})\|^2]$
 
 Where:
 - $z_t$ = noisy style latent at timestep $t$
@@ -182,16 +182,6 @@ Evaluates style transfer success using trained genre and composer classifiers.
 - **Result**: 29.35% ❌ (baseline: ~1/10 composers ≈ 10%)
 - **Interpretation**: Style transfer significantly alters composer-specific features
 
-### 3. Musical Feature Analysis
-- **Pitch range changes**: Measures shift in pitch distribution
-- **Rhythm complexity**: Compares duration entropy
-- **Velocity variation**: Assesses dynamic range changes
-- **Syncopation**: Detects off-beat emphasis (jazz characteristic)
-
-### 4. Content Preservation
-- **Melodic contour similarity**: Percentage of matching pitch direction changes
-- **Structural preservation**: Measure and position alignment
-- **Rhythm preservation**: Correlation of duration patterns
 
 ## 📁 Project Structure
 

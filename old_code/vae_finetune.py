@@ -5,7 +5,7 @@ Start from existing checkpoint, ramp AR ratio quickly, and maintain high KL weig
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, ConcatDataset
-from vae_octuples import OctupleVAE, vae_loss
+from old_code.vae_octuples import OctupleVAE, vae_loss
 from vae_training import OctupleDataset, collate_fn, load_octuples_from_folder
 import json
 import os
