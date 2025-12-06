@@ -166,13 +166,14 @@ Evaluates style transfer success using trained genre and composer classifiers.
 ### 1. Genre Classification
 - **Metric**: Percentage classified as jazz by logistic classifier
 - **Success**: Higher percentage = better style transfer
-- **Result**: 89.7% ✅
+- **Result**: 89.7%
 
 ### 2. Composer Identity Retention
 - **Metric**: Accuracy of composer prediction on diffused latents
 - **Success**: Higher accuracy = better content preservation
-- **Result**: 29.35% ❌ (baseline: ~1/10 composers ≈ 10%)
-- **Interpretation**: Style transfer significantly alters composer-specific features
+- **Result**: 29.35% (baseline: ~1/10 composers ≈ 10%)
+
+It appears under this current architecture style transfer significantly alters composer-specific features.
 
 
 ## 📁 Project Structure
