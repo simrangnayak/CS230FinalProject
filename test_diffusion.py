@@ -11,7 +11,7 @@ from scipy.io.wavfile import write
 import pretty_midi
 
 from musicbert.preprocess import encoding_to_MIDI
-from vae_octuples import OctupleVAE
+from old_code.vae_octuples import OctupleVAE
 from vae_octuples_hierarchical import OctupleVAE_HierarchicalDecoder
 from vae_training import load_octuples_from_folder, OctupleDataset
 from musicbert.preprocess import encoding_to_MIDI, str_to_encoding

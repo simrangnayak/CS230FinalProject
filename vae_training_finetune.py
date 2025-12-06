@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import DataLoader, Dataset
-from vae_octuples import OctupleVAE, vae_loss
+from old_code.vae_octuples import OctupleVAE, vae_loss
 from vae_octuples_hierarchical import OctupleVAE_HierarchicalDecoder
 import os
 from glob import glob

@@ -1,6 +1,6 @@
 from musicbert.preprocess import str_to_encoding, encoding_to_MIDI
 import torch
-from vae_octuples import OctupleVAE
+from old_code.vae_octuples import OctupleVAE
 from vae_octuples_hierarchical import OctupleVAE_HierarchicalDecoder
 import random
 

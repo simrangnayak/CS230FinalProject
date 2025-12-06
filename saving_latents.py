@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from vae_octuples import OctupleVAE
+from old_code.vae_octuples import OctupleVAE
 from vae_octuples_hierarchical import OctupleVAE_HierarchicalDecoder
 import numpy as np
 import os
